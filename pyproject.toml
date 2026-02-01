@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "automated-dcf"
+version = "1.0.0"
+description = "A modern, automated Discounted Cash Flow (DCF) valuation tool"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Nico Rode"}
+]
+dependencies = [
+    "yfinance",
+    "pandas",
+    "numpy",
+    "numpy-financial",
+    "openpyxl",
+    "matplotlib",
+    "click"
+]
+
+[project.scripts]
+dcf = "automated_dcf.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["automated_dcf*"]
