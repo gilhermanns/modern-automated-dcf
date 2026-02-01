@@ -1,0 +1,7 @@
+yfinance
+pandas
+numpy
+numpy-financial
+openpyxl
+matplotlib
+click

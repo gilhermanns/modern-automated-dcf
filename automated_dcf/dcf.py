@@ -3,8 +3,10 @@ import pandas as pd
 import numpy as np
 import numpy_financial as npf
 import matplotlib.pyplot as plt
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, List
 import os
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 class DCFModel:
     def __init__(self, ticker: str):
@@ -36,8 +38,8 @@ class DCFModel:
                 return df.loc[key]
         return pd.Series([default] * len(df.columns), index=df.columns)
 
-    def calculate_wacc(self) -> float:
-        """Calculate Weighted Average Cost of Capital (WACC)."""
+    def calculate_wacc(self) -> Dict:
+        """Calculate Weighted Average Cost of Capital (WACC) and return components."""
         # Risk-free rate (10Y Treasury yield as proxy, default 4%)
         risk_free_rate = 0.04 
         
@@ -79,15 +81,25 @@ class DCFModel:
         total_value = market_cap + total_debt
         
         if total_value == 0 or np.isnan(total_value):
-            return 0.08 # Default WACC if data missing
-            
-        wacc = (market_cap / total_value) * cost_of_equity + \
-               (total_debt / total_value) * cost_of_debt * (1 - tax_rate)
+            wacc = 0.08
+        else:
+            wacc = (market_cap / total_value) * cost_of_equity + \
+                   (total_debt / total_value) * cost_of_debt * (1 - tax_rate)
         
-        return wacc if not np.isnan(wacc) else 0.08
+        return {
+            'wacc': wacc if not np.isnan(wacc) else 0.08,
+            'cost_of_equity': cost_of_equity,
+            'cost_of_debt': cost_of_debt,
+            'tax_rate': tax_rate,
+            'equity_weight': market_cap / total_value if total_value > 0 else 1.0,
+            'debt_weight': total_debt / total_value if total_value > 0 else 0.0,
+            'beta': beta,
+            'risk_free_rate': risk_free_rate,
+            'market_return': market_return
+        }
 
     def run_dcf(self, 
-                years: int = 5, 
+                years: int = 10, 
                 growth_rate: float = 0.05, 
                 discount_rate: Optional[float] = None, 
                 perpetual_growth: float = 0.025) -> Dict:
@@ -96,7 +108,6 @@ class DCFModel:
             self.fetch_data()
             
         # 1. Calculate Historical FCF
-        # FCF = Operating Cash Flow - CapEx
         ocf = self.get_metric(self.cash_flow, ['Operating Cash Flow', 'Total Cash From Operating Activities'])
         capex = abs(self.get_metric(self.cash_flow, ['Capital Expenditure', 'Net PPE Purchase And Sale']))
         
@@ -104,8 +115,9 @@ class DCFModel:
         current_fcf = fcf_history.iloc[0] # Most recent year
         
         # 2. Determine Discount Rate (WACC)
+        wacc_components = self.calculate_wacc()
         if discount_rate is None:
-            discount_rate = self.calculate_wacc()
+            discount_rate = wacc_components['wacc']
             
         # 3. Project Future Cash Flows
         projections = []
@@ -142,11 +154,15 @@ class DCFModel:
             'enterprise_value': enterprise_value,
             'equity_value': equity_value,
             'wacc': discount_rate,
+            'wacc_components': wacc_components,
             'growth_rate': growth_rate,
             'perpetual_growth': perpetual_growth,
             'fcf_history': fcf_history.to_dict(),
             'projections': projections,
-            'upside': (intrinsic_value / self.info.get('currentPrice', 1)) - 1
+            'upside': (intrinsic_value / self.info.get('currentPrice', 1)) - 1,
+            'shares': shares,
+            'cash': cash,
+            'debt': debt
         }
         
         return self.results
@@ -163,67 +179,148 @@ class DCFModel:
         return pd.DataFrame(matrix, index=[f"{d*100:.1f}%" for d in discount_range], 
                           columns=[f"{g*100:.1f}%" for g in growth_range])
 
+    def _apply_corporate_style(self, ws, title):
+        """Apply professional corporate styling to a worksheet."""
+        blue_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+        white_font = Font(color='FFFFFF', bold=True)
+        header_font = Font(bold=True)
+        border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        
+        # Title
+        ws.merge_cells('A1:E1')
+        ws['A1'] = title
+        ws['A1'].font = Font(size=14, bold=True)
+        ws['A1'].alignment = Alignment(horizontal='center')
+        
+        # Headers
+        for cell in ws[2]:
+            cell.fill = blue_fill
+            cell.font = white_font
+            cell.alignment = Alignment(horizontal='center')
+            cell.border = border
+
+        # Auto-adjust column width
+        for col in ws.columns:
+            max_length = 0
+            # Use the first cell that is not a MergedCell to get the column letter
+            column_letter = None
+            for cell in col:
+                if not column_letter and hasattr(cell, 'column_letter'):
+                    column_letter = cell.column_letter
+                try:
+                    if cell.value and len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            if column_letter:
+                adjusted_width = (max_length + 2)
+                ws.column_dimensions[column_letter].width = adjusted_width
+
     def export_to_excel(self, filename: str = None):
-        """Export DCF results and sensitivity analysis to Excel."""
+        """Export DCF results with professional formatting."""
         if not self.results:
             self.run_dcf()
             
         if filename is None:
-            filename = f"{self.ticker_symbol}_DCF_Analysis.xlsx"
+            filename = f"{self.ticker_symbol}_DCF_Model.xlsx"
             
         with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-            # Summary Sheet
+            # Sheet 1: Historical Financials
+            hist_df = pd.concat([self.financials, self.balance_sheet, self.cash_flow])
+            hist_df.to_excel(writer, sheet_name='Historical Financials')
+            self._apply_corporate_style(writer.sheets['Historical Financials'], f"Historical Financial Data: {self.ticker_symbol}")
+
+            # Sheet 2: DCF Projections
+            proj_df = pd.DataFrame({
+                'Year': [f"Year {i+1}" for i in range(len(self.results['projections']))],
+                'Projected FCF': self.results['projections']
+            })
+            proj_df.to_excel(writer, sheet_name='DCF Projections', index=False, startrow=1)
+            self._apply_corporate_style(writer.sheets['DCF Projections'], f"10-Year FCF Projections: {self.ticker_symbol}")
+
+            # Sheet 3: Valuation Summary
             summary_data = {
-                'Metric': ['Ticker', 'Current Price', 'Intrinsic Value', 'Upside', 'WACC', 'Growth Rate', 'Perpetual Growth'],
+                'Metric': ['Ticker', 'Current Price', 'Intrinsic Value', 'Upside', 'WACC', 'Enterprise Value', 'Equity Value', 'Shares Outstanding', 'Cash', 'Debt'],
                 'Value': [
                     self.results['ticker'],
                     self.results['current_price'],
                     self.results['intrinsic_value'],
                     f"{self.results['upside']*100:.2f}%",
                     f"{self.results['wacc']*100:.2f}%",
-                    f"{self.results['growth_rate']*100:.2f}%",
-                    f"{self.results['perpetual_growth']*100:.2f}%"
+                    self.results['enterprise_value'],
+                    self.results['equity_value'],
+                    self.results['shares'],
+                    self.results['cash'],
+                    self.results['debt']
                 ]
             }
-            pd.DataFrame(summary_data).to_excel(writer, sheet_name='Summary', index=False)
-            
-            # Projections Sheet
-            proj_df = pd.DataFrame({
-                'Year': [f"Year {i+1}" for i in range(len(self.results['projections']))],
-                'Projected FCF': self.results['projections']
-            })
-            proj_df.to_excel(writer, sheet_name='Projections', index=False)
-            
-            # Sensitivity Analysis
-            growth_rates = np.linspace(self.results['growth_rate'] - 0.02, self.results['growth_rate'] + 0.02, 5)
-            discount_rates = np.linspace(self.results['wacc'] - 0.02, self.results['wacc'] + 0.02, 5)
-            sensitivity_df = self.sensitivity_analysis(growth_rates, discount_rates)
-            sensitivity_df.to_excel(writer, sheet_name='Sensitivity Analysis')
+            pd.DataFrame(summary_data).to_excel(writer, sheet_name='Valuation Summary', index=False, startrow=1)
+            self._apply_corporate_style(writer.sheets['Valuation Summary'], f"Valuation Summary: {self.ticker_symbol}")
 
-    def plot_results(self, save_path: str = None):
-        """Plot historical FCF and projections."""
+            # Sheet 4: Sensitivity Analysis
+            growth_rates = np.linspace(0.01, 0.04, 25)
+            discount_rates = np.linspace(0.06, 0.18, 25)
+            sensitivity_df = self.sensitivity_analysis(growth_rates, discount_rates)
+            sensitivity_df.to_excel(writer, sheet_name='Sensitivity Analysis', startrow=1)
+            self._apply_corporate_style(writer.sheets['Sensitivity Analysis'], f"Sensitivity Analysis (WACC vs Growth): {self.ticker_symbol}")
+
+            # Sheet 5: Assumptions
+            assumptions = {
+                'Assumption': ['Growth Rate (Explicit)', 'Perpetual Growth Rate', 'Risk-Free Rate', 'Market Return', 'Beta', 'Cost of Equity', 'Cost of Debt', 'Tax Rate'],
+                'Value': [
+                    self.results['growth_rate'],
+                    self.results['perpetual_growth'],
+                    self.results['wacc_components']['risk_free_rate'],
+                    self.results['wacc_components']['market_return'],
+                    self.results['wacc_components']['beta'],
+                    self.results['wacc_components']['cost_of_equity'],
+                    self.results['wacc_components']['cost_of_debt'],
+                    self.results['wacc_components']['tax_rate']
+                ]
+            }
+            pd.DataFrame(assumptions).to_excel(writer, sheet_name='Assumptions', index=False, startrow=1)
+            self._apply_corporate_style(writer.sheets['Assumptions'], f"Model Assumptions: {self.ticker_symbol}")
+
+    def plot_all_charts(self, output_dir: str = "charts"):
+        """Generate all required charts for the demo."""
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            
         if not self.results:
             self.run_dcf()
-            
-        hist_fcf = list(self.results['fcf_history'].values())[::-1] # Reverse to chronological
-        projections = self.results['projections']
-        
+
+        # 1. Historical Revenue/FCF
+        hist_fcf = list(self.results['fcf_history'].values())[::-1]
         years_hist = list(range(-len(hist_fcf) + 1, 1))
-        years_proj = list(range(1, len(projections) + 1))
         
         plt.figure(figsize=(10, 6))
         plt.plot(years_hist, hist_fcf, marker='o', label='Historical FCF')
-        plt.plot(years_proj, projections, marker='s', linestyle='--', label='Projected FCF')
-        
-        plt.axvline(x=0, color='gray', linestyle=':')
-        plt.title(f"Free Cash Flow Projection: {self.ticker_symbol}")
+        plt.title(f"Historical Free Cash Flow: {self.ticker_symbol}")
         plt.xlabel("Years from Present")
-        plt.ylabel("Free Cash Flow")
-        plt.legend()
+        plt.ylabel("FCF (USD)")
         plt.grid(True, alpha=0.3)
+        plt.savefig(f"{output_dir}/{self.ticker_symbol}_historical_fcf.png")
+        plt.close()
+
+        # 2. 10-year FCF Projection Waterfall (Simplified as bar chart)
+        projections = self.results['projections']
+        years_proj = list(range(1, len(projections) + 1))
         
-        if save_path:
-            plt.savefig(save_path)
-            plt.close()
-        else:
-            plt.show()
+        plt.figure(figsize=(10, 6))
+        plt.bar(years_proj, projections, color='skyblue', label='Projected FCF')
+        plt.title(f"10-Year FCF Projection: {self.ticker_symbol}")
+        plt.xlabel("Year")
+        plt.ylabel("FCF (USD)")
+        plt.savefig(f"{output_dir}/{self.ticker_symbol}_fcf_projection.png")
+        plt.close()
+
+        # 3. WACC Components Pie Chart
+        w = self.results['wacc_components']
+        labels = ['Equity Weight', 'Debt Weight']
+        sizes = [w['equity_weight'], w['debt_weight']]
+        
+        plt.figure(figsize=(8, 8))
+        plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140, colors=['#1f4e78', '#a6a6a6'])
+        plt.title(f"Capital Structure (WACC Components): {self.ticker_symbol}")
+        plt.savefig(f"{output_dir}/{self.ticker_symbol}_wacc_pie.png")
+        plt.close()

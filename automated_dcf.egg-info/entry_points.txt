@@ -1,0 +1,2 @@
+[console_scripts]
+dcf = automated_dcf.cli:main
