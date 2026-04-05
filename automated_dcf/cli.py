@@ -29,9 +29,10 @@ def main(ticker, years, growth, discount, output):
             model.export_to_excel(filename)
             click.echo(f"\nExcel report saved to: {filename}")
             
-            plot_filename = f"{ticker}_DCF_Plot.png"
-            model.plot_results(plot_filename)
-            click.echo(f"Plot saved to: {plot_filename}")
+            # plot_results is not implemented in DCFModel, using plot_all_charts instead
+            output_dir = "charts"
+            model.plot_all_charts(output_dir)
+            click.echo(f"Charts saved to: {output_dir}/")
         elif output == 'csv':
             filename = f"{ticker}_DCF_Results.csv"
             pd.DataFrame([results]).to_csv(filename, index=False)
