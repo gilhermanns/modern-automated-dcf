@@ -1,12 +1,10 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import numpy_financial as npf
-import matplotlib.pyplot as plt
-from typing import Dict, Optional, Union, List
+from typing import Dict, Optional, List
 import os
+import matplotlib.pyplot as plt
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
 
 class DCFModel:
     def __init__(self, ticker: str):
