@@ -1,53 +1,51 @@
 # Modern Automated DCF
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://github.com/gilhermanns/modern-automated-dcf/actions/workflows/tests.yml/badge.svg)](https://github.com/gilhermanns/modern-automated-dcf/actions/workflows/tests.yml)
 
-A professional-grade Discounted Cash Flow (DCF) modeling framework. This tool automates the extraction of financial data and provides a robust, rule-based valuation analysis.
+A Python framework for **Discounted Cash Flow scenario analysis**. It retrieves historical financial data, applies an explicit WACC and terminal-value framework, and produces sensitivity tables and charts for analyst review. The model is a research tool: a DCF output is conditional on its data, forecast and discount-rate assumptions.
 
-## Core Features
-- **Automated Data Ingestion**: Fetches historical financials directly via `yfinance`.
-- **WACC Calculation**: Rule-based CAPM implementation for cost of equity and debt.
-- **Sensitivity Analysis**: Evaluates intrinsic value across various growth and discount rate scenarios.
-- **Professional Reporting**: Exports formatted Excel models for further analysis.
+## What it covers
 
-## Worked Example: Apple Inc. (AAPL)
+| Component | Purpose |
+|---|---|
+| Data retrieval | Retrieves historical financial statement data through `yfinance` for a selected ticker. |
+| DCF mechanics | Connects projected cash flows, discount rates and terminal value to an enterprise- and equity-value estimate. |
+| Sensitivity analysis | Shows how intrinsic-value outputs move across growth and discount-rate assumptions. |
+| Reporting | Produces projection and sensitivity charts for review and further modelling. |
 
-Below is a demonstration of how the model processes a real-world company.
+## Example use
 
 ```python
 from automated_dcf.dcf import DCFModel
 
-# Initialize model for Apple
 model = DCFModel("AAPL")
+result = model.run_dcf(growth_rate=0.05, perpetual_growth=0.02)
 
-# Run valuation with 5% growth and 2% terminal growth
-results = model.run_dcf(growth_rate=0.05, perpetual_growth=0.02)
-
-print(f"Intrinsic Value: ${results['intrinsic_value']:.2f}")
-print(f"Current Price: ${results['current_price']:.2f}")
-print(f"Upside: {results['upside']*100:.1f}%")
+print(result["intrinsic_value"])
 ```
 
-### Model Output (Illustrative)
-| Metric | Value |
-| :--- | :--- |
-| **Enterprise Value** | $2.85 Trillion |
-| **Equity Value** | $2.91 Trillion |
-| **WACC** | 8.2% |
-| **Implied Upside** | +12.4% |
+The result is an assumption-dependent analytical output, not a price target or an investment recommendation. No illustrative valuation or upside figure is presented here because such values change with the data retrieval date and model inputs.
 
-## Technical Architecture
-The model follows a modular structure, separating data ingestion, financial logic, and reporting layers. It adheres to PEP 8 standards and avoids hard-coded "magic numbers" by using configurable financial constants.
+## Installation and run
 
-## Installation
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/gilhermanns/modern-automated-dcf.git
+cd modern-automated-dcf
+python -m pip install -r requirements.txt
+python -m pytest -q
 ```
 
-## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Validation
+
+The test suite checks metric fallback behaviour, the sensitivity-grid interface, restoration of the base case after sensitivity analysis, and creation of projection and sensitivity chart files. A separate live-data test is intentionally skipped because it depends on an external market-data connection.
+
+## Limitations
+
+- Public market-data fields can be incomplete, restated or unavailable.
+- WACC, forecast growth and terminal growth are assumptions that require analyst judgement.
+- The framework does not replace a full company model, financial-statement review or investment-committee process.
 
 ---
 
 *Entwickelt mit Unterstützung von Claude Code (Anthropic).*
+*For research and educational purposes; not investment advice.*
