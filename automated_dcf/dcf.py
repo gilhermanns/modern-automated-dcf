@@ -259,6 +259,64 @@ class DCFModel:
             values="Intrinsic Value",
         )
 
+    def plot_all_charts(self, output_dir: str = "outputs/charts") -> Dict[str, str]:
+        """Create README-ready projection and sensitivity charts from the current DCF run."""
+        if not self.results:
+            self.run_dcf()
+
+        os.makedirs(output_dir, exist_ok=True)
+        projections = self.results.get("projections", [])
+        if not projections:
+            raise ValueError("DCF projections are required before charts can be generated.")
+
+        projection_path = os.path.join(
+            output_dir, f"{self.ticker_symbol}_fcf_projections.png"
+        )
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        ax.plot(range(1, len(projections) + 1), projections, marker="o", color="#1f4e78")
+        ax.set_title(f"{self.ticker_symbol} projected free cash flow")
+        ax.set_xlabel("Projection year")
+        ax.set_ylabel("Free cash flow")
+        ax.grid(alpha=0.25)
+        fig.tight_layout()
+        fig.savefig(projection_path, dpi=160)
+        plt.close(fig)
+
+        base_wacc = float(self.results.get("wacc", DEFAULT_WACC))
+        perpetual_growth = float(self.results.get("perpetual_growth", 0.02))
+        discount_rates = sorted(
+            {
+                max(base_wacc - 0.01, perpetual_growth + 0.005),
+                base_wacc,
+                base_wacc + 0.01,
+            }
+        )
+        sensitivity = self.sensitivity_analysis(
+            growth_rates=[0.02, 0.04, 0.06],
+            discount_rates=discount_rates,
+            perpetual_growth=perpetual_growth,
+        )
+
+        sensitivity_path = os.path.join(
+            output_dir, f"{self.ticker_symbol}_sensitivity.png"
+        )
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        image = ax.imshow(sensitivity.values, cmap="RdYlGn")
+        ax.set_title(f"{self.ticker_symbol} intrinsic value sensitivity")
+        ax.set_xlabel("Discount rate")
+        ax.set_ylabel("FCF growth rate")
+        ax.set_xticks(range(len(sensitivity.columns)), [f"{x:.1%}" for x in sensitivity.columns])
+        ax.set_yticks(range(len(sensitivity.index)), [f"{x:.1%}" for x in sensitivity.index])
+        for row, growth_rate in enumerate(sensitivity.index):
+            for col, discount_rate in enumerate(sensitivity.columns):
+                ax.text(col, row, f"{sensitivity.loc[growth_rate, discount_rate]:.2f}", ha="center", va="center")
+        fig.colorbar(image, ax=ax, label="Intrinsic value per share")
+        fig.tight_layout()
+        fig.savefig(sensitivity_path, dpi=160)
+        plt.close(fig)
+
+        return {"projections": projection_path, "sensitivity": sensitivity_path}
+
     def export_to_excel(self, filename: Optional[str] = None):
         """Export results to a professionally formatted Excel file."""
         if not self.results:
