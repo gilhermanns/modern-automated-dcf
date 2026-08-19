@@ -207,6 +207,58 @@ class DCFModel:
         
         return self.results
 
+    def sensitivity_analysis(
+        self,
+        growth_rates: List[float],
+        discount_rates: List[float],
+        years: int = 10,
+        perpetual_growth: Optional[float] = None,
+    ) -> pd.DataFrame:
+        """Return an intrinsic-value sensitivity table for growth and discount-rate scenarios.
+
+        The method reuses the model's existing assumptions and restores the base-case
+        results afterwards, so generating a sensitivity table does not overwrite the
+        valuation shown in the main model output.
+        """
+        if not growth_rates or not discount_rates:
+            raise ValueError("Growth rates and discount rates must not be empty.")
+
+        if not self.results:
+            self.run_dcf(years=years)
+
+        base_results = self.results.copy()
+        terminal_growth = (
+            perpetual_growth
+            if perpetual_growth is not None
+            else base_results.get("perpetual_growth", 0.02)
+        )
+        scenarios = []
+
+        try:
+            for growth_rate in growth_rates:
+                for discount_rate in discount_rates:
+                    scenario = self.run_dcf(
+                        years=years,
+                        growth_rate=growth_rate,
+                        discount_rate=discount_rate,
+                        perpetual_growth=terminal_growth,
+                    )
+                    scenarios.append(
+                        {
+                            "Growth Rate": growth_rate,
+                            "Discount Rate": discount_rate,
+                            "Intrinsic Value": scenario["intrinsic_value"],
+                        }
+                    )
+        finally:
+            self.results = base_results
+
+        return pd.DataFrame(scenarios).pivot(
+            index="Growth Rate",
+            columns="Discount Rate",
+            values="Intrinsic Value",
+        )
+
     def export_to_excel(self, filename: Optional[str] = None):
         """Export results to a professionally formatted Excel file."""
         if not self.results:
